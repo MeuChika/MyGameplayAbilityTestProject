@@ -3,6 +3,7 @@
 #include "ShooterGame.h"
 #include "Pickups/ShooterPickup_Health.h"
 #include "OnlineSubsystemUtils.h"
+#include "MyAbilitySystemComponent.h"
 
 AShooterPickup_Health::AShooterPickup_Health(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
 {
@@ -11,14 +12,16 @@ AShooterPickup_Health::AShooterPickup_Health(const FObjectInitializer& ObjectIni
 
 bool AShooterPickup_Health::CanBePickedUp(class AShooterCharacter* TestPawn) const
 {
-	return TestPawn && (TestPawn->Health < TestPawn->GetMaxHealth());
+	return TestPawn && (TestPawn->GetHealth() < TestPawn->GetMaxHealth());
 }
 
 void AShooterPickup_Health::GivePickupTo(class AShooterCharacter* Pawn)
 {
 	if (Pawn)
 	{
-		Pawn->Health = FMath::Min(FMath::TruncToInt(Pawn->Health) + Health, Pawn->GetMaxHealth());
+		FGameplayEffectContextHandle TempEffectContext;
+		Pawn->GetAbilitySystemComponent()->ApplyGameplayEffectToSelf(EffectToApply.GetDefaultObject(),1.f,TempEffectContext);
+		/*Pawn->SetHealth(FMath::Min(FMath::TruncToInt(Pawn->GetHealth()) + static_cast<float>(Health), Pawn->GetMaxHealth()));
 
 		// Fire event for collected health
 		const UWorld* World = GetWorld();
@@ -57,6 +60,6 @@ void AShooterPickup_Health::GivePickupTo(class AShooterCharacter* Pawn)
 					}
 				}
 			}
-		}
+		}*/
 	}
 }

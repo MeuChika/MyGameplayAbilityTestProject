@@ -1,13 +1,17 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "4.25",
+	"EngineAssociation": "4.26",
 	"Category": "Samples",
 	"Description": "",
 	"Modules": [
 		{
 			"Name": "ShooterGame",
 			"Type": "Runtime",
-			"LoadingPhase": "Default"
+			"LoadingPhase": "Default",
+			"AdditionalDependencies": [
+				"GameplayAbilities",
+				"Engine"
+			]
 		},
 		{
 			"Name": "ShooterGameLoadingScreen",
@@ -74,6 +78,10 @@
 		},
 		{
 			"Name": "Synthesis",
+			"Enabled": true
+		},
+		{
+			"Name": "GameplayAbilities",
 			"Enabled": true
 		}
 	],

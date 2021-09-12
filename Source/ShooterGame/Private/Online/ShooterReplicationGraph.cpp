@@ -604,7 +604,7 @@ void UShooterReplicationGraphNode_AlwaysRelevant_ForConnection::GatherActorLists
 		if (AShooterPlayerController* PC = Cast<AShooterPlayerController>(CurViewer.InViewer))
 		{
 			// 50% throttling of PlayerStates.
-			const bool bReplicatePS = (Params.ConnectionManager.ConnectionId % 2) == (Params.ReplicationFrameNum % 2);
+			const bool bReplicatePS = (Params.ConnectionManager.ConnectionOrderNum % 2) == (Params.ReplicationFrameNum % 2);
 			if (bReplicatePS)
 			{
 				// Always return the player state to the owning player. Simulated proxy player states are handled by UShooterReplicationGraphNode_PlayerStateFrequencyLimiter
@@ -635,7 +635,7 @@ void UShooterReplicationGraphNode_AlwaysRelevant_ForConnection::GatherActorLists
 
 			if (AShooterCharacter* Pawn = Cast<AShooterCharacter>(PC->GetPawn()))
 			{
-				ResetActorCullDistance(Pawn, LastData->LastViewer);
+				ResetActorCullDistance(Pawn, static_cast<AActor*&>(LastData->LastViewer));
 
 				if (Pawn != CurViewer.ViewTarget)
 				{
@@ -655,7 +655,7 @@ void UShooterReplicationGraphNode_AlwaysRelevant_ForConnection::GatherActorLists
 
 			if (AShooterCharacter* ViewTargetPawn = Cast<AShooterCharacter>(CurViewer.ViewTarget))
 			{
-				ResetActorCullDistance(ViewTargetPawn, LastData->LastViewTarget);
+				ResetActorCullDistance(ViewTargetPawn, static_cast<AActor*&>(LastData->LastViewTarget));
 			}
 		}
 	}

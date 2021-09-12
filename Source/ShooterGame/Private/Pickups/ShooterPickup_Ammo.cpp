@@ -3,6 +3,7 @@
 #include "ShooterGame.h"
 #include "Pickups/ShooterPickup_Ammo.h"
 #include "Weapons/ShooterWeapon.h"
+#include "MyAbilitySystemComponent.h"
 #include "OnlineSubsystemUtils.h"
 
 AShooterPickup_Ammo::AShooterPickup_Ammo(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
@@ -31,7 +32,10 @@ void AShooterPickup_Ammo::GivePickupTo(class AShooterCharacter* Pawn)
 	AShooterWeapon* Weapon = (Pawn ? Pawn->FindWeapon(WeaponType) : NULL);
 	if (Weapon)
 	{
-		int32 Qty = AmmoClips * Weapon->GetAmmoPerClip();
+		FGameplayEffectContextHandle TempEffectContext;
+		Weapon->GetAbilitySystemComponent()->ApplyGameplayEffectToSelf(EffectToApply.GetDefaultObject(),1.f,TempEffectContext);
+		
+		/*int32 Qty = AmmoClips * Weapon->GetAmmoPerClip();
 		Weapon->GiveAmmo(Qty);
 
 		// Fire event for collected ammo
@@ -74,6 +78,6 @@ void AShooterPickup_Ammo::GivePickupTo(class AShooterCharacter* Pawn)
 					}
 				}
 			}
-		}
+		}*/
 	}
 }

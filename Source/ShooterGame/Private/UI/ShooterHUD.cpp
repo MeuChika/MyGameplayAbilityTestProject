@@ -190,7 +190,7 @@ void AShooterHUD::DrawWeaponHUD()
 			TextItem.FontRenderInfo = ShadowedFont;
 			Canvas->DrawItem( TextItem, TopTextPosX, TopTextPosY );
 			TopTextHeight = SizeY * TopTextScale;
-			Text = FString::FromInt(MyWeapon->GetCurrentAmmo() - MyWeapon->GetCurrentAmmoInClip());
+			Text = FString::FromInt(MyWeapon->GetCurrentAmmo() /*- MyWeapon->GetCurrentAmmoInClip()*/);
 			Canvas->StrLen(BigFont, Text, SizeX, SizeY);
 
 			const float BottomTextScale = 0.49f; // of 51pt font
@@ -322,7 +322,7 @@ void AShooterHUD::DrawHealth()
 	const float HealthPosX = (Canvas->ClipX - HealthBarBg.UL * ScaleUI) / 2;
 	const float HealthPosY = Canvas->ClipY - (Offset + HealthBarBg.VL) * ScaleUI;
 	Canvas->DrawIcon(HealthBarBg, HealthPosX, HealthPosY, ScaleUI);
-	const float HealthAmount =  FMath::Min(1.0f,MyPawn->Health / MyPawn->GetMaxHealth());
+	const float HealthAmount =  FMath::Min(1.0f,MyPawn->GetHealth() / MyPawn->GetMaxHealth());
 
 	FCanvasTileItem TileItem(FVector2D(HealthPosX,HealthPosY), HealthBar.Texture->Resource, 
 							 FVector2D(HealthBar.UL * HealthAmount  * ScaleUI, HealthBar.VL * ScaleUI), FLinearColor::White);
@@ -522,10 +522,10 @@ void AShooterHUD::DrawHUD()
 	ScaleUI = FMath::Max(ScaleUI, MinHudScale);
 	
 	AShooterCharacter* MyPawn = Cast<AShooterCharacter>(GetOwningPawn());
-	if (MyPawn && MyPawn->IsAlive() && MyPawn->Health < MyPawn->GetMaxHealth() * MyPawn->GetLowHealthPercentage())
+	if (MyPawn && MyPawn->IsAlive() && MyPawn->GetHealth() < MyPawn->GetMaxHealth() * MyPawn->GetLowHealthPercentage())
 	{
-		const float AnimSpeedModifier = 1.0f + 5.0f * (1.0f - MyPawn->Health/(MyPawn->GetMaxHealth() * MyPawn->GetLowHealthPercentage()));
-		int32 EffectValue = 32 + 72 * (1.0f - MyPawn->Health/(MyPawn->GetMaxHealth() * MyPawn->GetLowHealthPercentage()));
+		const float AnimSpeedModifier = 1.0f + 5.0f * (1.0f - MyPawn->GetHealth()/(MyPawn->GetMaxHealth() * MyPawn->GetLowHealthPercentage()));
+		int32 EffectValue = 32 + 72 * (1.0f - MyPawn->GetHealth()/(MyPawn->GetMaxHealth() * MyPawn->GetLowHealthPercentage()));
 		PulseValue += GetWorld()->GetDeltaSeconds() * AnimSpeedModifier;
 		float EffectAlpha = FMath::Abs(FMath::Sin(PulseValue));
 
@@ -909,7 +909,7 @@ void AShooterHUD::NotifyWeaponHit(float DamageTaken, struct FDamageEvent const& 
 		}
 		if (DirIndex > -1)
 		{
-			const float DamageTakenPercentage = (DamageTaken / MyPawn->Health);
+			const float DamageTakenPercentage = (DamageTaken / MyPawn->GetHealth());
 			HitNotifyData[DirIndex].HitPercentage += DamageTakenPercentage * 2;
 			HitNotifyData[DirIndex].HitPercentage = FMath::Clamp(HitNotifyData[DirIndex].HitPercentage, 0.0f, 1.0f);
 			HitNotifyData[DirIndex].HitTime = CurrentTime;

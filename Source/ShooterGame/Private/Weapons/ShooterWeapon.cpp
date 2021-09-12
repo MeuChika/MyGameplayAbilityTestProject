@@ -7,6 +7,12 @@
 #include "Bots/ShooterAIController.h"
 #include "Online/ShooterPlayerState.h"
 #include "UI/ShooterHUD.h"
+#include "Camera/CameraShake.h"
+#include "AbilitySystemComponent.h"
+#include "MyAbilitySystemComponent.h"
+#include "MyWeaponAttributeSet.h"
+#include "MyGameplayAbility.h"
+#include <GameplayEffectTypes.h>
 
 AShooterWeapon::AShooterWeapon(const FObjectInitializer& ObjectInitializer) : Super(ObjectInitializer)
 {
@@ -40,8 +46,8 @@ AShooterWeapon::AShooterWeapon(const FObjectInitializer& ObjectInitializer) : Su
 	bPendingEquip = false;
 	CurrentState = EWeaponState::Idle;
 
-	CurrentAmmo = 0;
-	CurrentAmmoInClip = 0;
+	//CurrentAmmo = 0;
+	//CurrentAmmoInClip = 0;
 	BurstCounter = 0;
 	LastFireTime = 0.0f;
 
@@ -50,17 +56,85 @@ AShooterWeapon::AShooterWeapon(const FObjectInitializer& ObjectInitializer) : Su
 	SetRemoteRoleForBackwardsCompat(ROLE_SimulatedProxy);
 	bReplicates = true;
 	bNetUseOwnerRelevancy = true;
+
+	// Our ability system component.
+	 AbilitySystemComponent = CreateDefaultSubobject<UMyAbilitySystemComponent>(TEXT("AbilitySystemComp"));
+	 AbilitySystemComponent->SetIsReplicated(true);
+	 AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Minimal);
+
+	Attributes = CreateDefaultSubobject<UMyWeaponAttributeSet>("Attributes");
+
+	// 사용할 태그를 저장.
+	FireTag = FGameplayTag::RequestGameplayTag(FName("Gun.Fire"));
+}
+
+UAbilitySystemComponent* AShooterWeapon::GetAbilitySystemComponent() const
+{
+	return AbilitySystemComponent;
+}
+
+void AShooterWeapon::BeginPlay()
+{
+	Super::BeginPlay();
+	
+	InitializeAttributes();
+	//if(HasAuthority())
+	{
+		AbilitySystemComponent->InitAbilityActorInfo(this, this);
+		GiveAbilies();
+	}
+
+	AmmoChangedDelegateHandle = AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(Attributes->GetAmmoInClipAttribute()).AddUObject(this, &AShooterWeapon::AmmoChanged);
+}
+
+void AShooterWeapon::InitializeAttributes()
+{
+	if(AbilitySystemComponent && DefaultAttributeEffect)
+	{
+		FGameplayEffectContextHandle EffectContext = AbilitySystemComponent->MakeEffectContext();
+		EffectContext.AddSourceObject(this);
+
+		FGameplayEffectSpecHandle SpecHandle = AbilitySystemComponent->MakeOutgoingSpec(DefaultAttributeEffect, 1, EffectContext);
+
+		if(SpecHandle.IsValid())
+		{
+			FActiveGameplayEffectHandle GEHandle = AbilitySystemComponent->ApplyGameplayEffectSpecToSelf(*SpecHandle.Data.Get());
+		}
+	}
+}
+
+void AShooterWeapon::GiveAbilies()
+{
+	if(HasAuthority() && AbilitySystemComponent)
+	{
+		for( TSubclassOf<UMyGameplayAbility>& StartupAbility : DefaultAbilities)
+		{
+			AbilitySystemComponent->GiveAbility(
+				FGameplayAbilitySpec(StartupAbility, 1, static_cast<int32>(StartupAbility.GetDefaultObject()->AbilityInputID),this));
+		}
+		
+	}
+}
+
+void AShooterWeapon::BindASC()
+{
+	if(AbilitySystemComponent && InputComponent)
+	{
+		const FGameplayAbilityInputBinds Binds("Confirm", "Cancel", "AbilityInput",
+			static_cast<int32>(AbilityInput::Confirm),static_cast<int32>(AbilityInput::Cancel));
+		AbilitySystemComponent->BindAbilityActivationToInputComponent(InputComponent, Binds);
+	}
 }
 
 void AShooterWeapon::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
 
-	if (WeaponConfig.InitialClips > 0)
-	{
-		CurrentAmmoInClip = WeaponConfig.AmmoPerClip;
-		CurrentAmmo = WeaponConfig.AmmoPerClip * WeaponConfig.InitialClips;
-	}
+	// if (WeaponConfig.InitialClips > 0)
+	// {
+	// 	CurrentAmmoInClip = WeaponConfig.AmmoPerClip;
+	// 	CurrentAmmo = WeaponConfig.AmmoPerClip * WeaponConfig.InitialClips;
+	// }
 
 	DetachMeshFromPawn();
 }
@@ -123,7 +197,7 @@ void AShooterWeapon::OnEquipFinished()
 	{
 		// try to reload empty clip
 		if (MyPawn->IsLocallyControlled() &&
-			CurrentAmmoInClip <= 0 &&
+			GetCurrentAmmoInClip() <= 0 &&
 			CanReload())
 		{
 			StartReload();
@@ -240,6 +314,7 @@ void AShooterWeapon::StopFire()
 	{
 		ServerStopFire();
 	}
+	
 
 	if (bWantsToFire)
 	{
@@ -347,7 +422,7 @@ bool AShooterWeapon::CanFire() const
 bool AShooterWeapon::CanReload() const
 {
 	bool bCanReload = (!MyPawn || MyPawn->CanReload());
-	bool bGotAmmo = ( CurrentAmmoInClip < WeaponConfig.AmmoPerClip) && (CurrentAmmo - CurrentAmmoInClip > 0 || HasInfiniteClip());
+	bool bGotAmmo = ( GetCurrentAmmoInClip() < GetAmmoPerClip()) && (GetCurrentAmmo() - GetCurrentAmmoInClip() > 0 || HasInfiniteClip());
 	bool bStateOKToReload = ( ( CurrentState ==  EWeaponState::Idle ) || ( CurrentState == EWeaponState::Firing) );
 	return ( ( bCanReload == true ) && ( bGotAmmo == true ) && ( bStateOKToReload == true) );	
 }
@@ -358,9 +433,9 @@ bool AShooterWeapon::CanReload() const
 
 void AShooterWeapon::GiveAmmo(int AddAmount)
 {
-	const int32 MissingAmmo = FMath::Max(0, WeaponConfig.MaxAmmo - CurrentAmmo);
+	const int32 MissingAmmo = FMath::Max(0, WeaponConfig.MaxAmmo - GetCurrentAmmo());
 	AddAmount = FMath::Min(AddAmount, MissingAmmo);
-	CurrentAmmo += AddAmount;
+	SetCurrentAmmo(GetCurrentAmmo() + AddAmount);
 
 	AShooterAIController* BotAI = MyPawn ? Cast<AShooterAIController>(MyPawn->GetController()) : NULL;
 	if (BotAI)
@@ -379,15 +454,17 @@ void AShooterWeapon::GiveAmmo(int AddAmount)
 
 void AShooterWeapon::UseAmmo()
 {
+	if (GetLocalRole() < ROLE_Authority) return; // 새로 추가된 부분
+
 	if (!HasInfiniteAmmo())
 	{
-		CurrentAmmoInClip--;
+		SetCurrentAmmoInClip( GetCurrentAmmoInClip() - 1 );
 	}
 
-	if (!HasInfiniteAmmo() && !HasInfiniteClip())
-	{
-		CurrentAmmo--;
-	}
+	// if (!HasInfiniteAmmo() && !HasInfiniteClip())
+	// {
+	// 	SetCurrentAmmo( GetCurrentAmmo() - 1 );
+	// }
 
 	AShooterAIController* BotAI = MyPawn ? Cast<AShooterAIController>(MyPawn->GetController()) : NULL;	
 	AShooterPlayerController* PlayerController = MyPawn ? Cast<AShooterPlayerController>(MyPawn->GetController()) : NULL;
@@ -416,7 +493,7 @@ void AShooterWeapon::HandleReFiring()
 	// Update TimerIntervalAdjustment
 	UWorld* MyWorld = GetWorld();
 
-	float SlackTimeThisFrame = FMath::Max(0.0f, (MyWorld->TimeSeconds - LastFireTime) - WeaponConfig.TimeBetweenShots);
+	float SlackTimeThisFrame = FMath::Max(0.0f, (MyWorld->TimeSeconds - LastFireTime) - GetTimeBetweenShots());
 
 	if (bAllowAutomaticWeaponCatchup)
 	{
@@ -428,7 +505,8 @@ void AShooterWeapon::HandleReFiring()
 
 void AShooterWeapon::HandleFiring()
 {
-	if ((CurrentAmmoInClip > 0 || HasInfiniteClip() || HasInfiniteAmmo()) && CanFire())
+	if ((GetCurrentAmmoInClip() > 0 || HasInfiniteClip() || HasInfiniteAmmo()) && CanFire())
+		
 	{
 		if (GetNetMode() != NM_DedicatedServer)
 		{
@@ -482,16 +560,16 @@ void AShooterWeapon::HandleFiring()
 		}
 
 		// reload after firing last round
-		if (CurrentAmmoInClip <= 0 && CanReload())
+		if (GetCurrentAmmoInClip() <= 0 && CanReload())
 		{
 			StartReload();
 		}
 
 		// setup refire timer
-		bRefiring = (CurrentState == EWeaponState::Firing && WeaponConfig.TimeBetweenShots > 0.0f);
+		bRefiring = (CurrentState == EWeaponState::Firing && GetTimeBetweenShots() > 0.0f);
 		if (bRefiring)
 		{
-			GetWorldTimerManager().SetTimer(TimerHandle_HandleFiring, this, &AShooterWeapon::HandleReFiring, FMath::Max<float>(WeaponConfig.TimeBetweenShots + TimerIntervalAdjustment, SMALL_NUMBER), false);
+			GetWorldTimerManager().SetTimer(TimerHandle_HandleFiring, this, &AShooterWeapon::HandleReFiring, FMath::Max<float>(GetTimeBetweenShots() + TimerIntervalAdjustment, SMALL_NUMBER), false);
 			TimerIntervalAdjustment = 0.f;
 		}
 	}
@@ -506,7 +584,7 @@ bool AShooterWeapon::ServerHandleFiring_Validate()
 
 void AShooterWeapon::ServerHandleFiring_Implementation()
 {
-	const bool bShouldUpdateAmmo = (CurrentAmmoInClip > 0 && CanFire());
+	const bool bShouldUpdateAmmo = (GetCurrentAmmoInClip() > 0 && CanFire());
 
 	HandleFiring();
 
@@ -522,21 +600,21 @@ void AShooterWeapon::ServerHandleFiring_Implementation()
 
 void AShooterWeapon::ReloadWeapon()
 {
-	int32 ClipDelta = FMath::Min(WeaponConfig.AmmoPerClip - CurrentAmmoInClip, CurrentAmmo - CurrentAmmoInClip);
+	int32 ClipDelta = FMath::Min(GetAmmoPerClip() - GetCurrentAmmoInClip(), GetCurrentAmmo() - GetCurrentAmmoInClip());
 
 	if (HasInfiniteClip())
 	{
-		ClipDelta = WeaponConfig.AmmoPerClip - CurrentAmmoInClip;
+		ClipDelta = GetAmmoPerClip() - GetCurrentAmmoInClip();
 	}
 
 	if (ClipDelta > 0)
 	{
-		CurrentAmmoInClip += ClipDelta;
+		SetCurrentAmmoInClip(GetCurrentAmmoInClip()+ ClipDelta);
 	}
 
 	if (HasInfiniteClip())
 	{
-		CurrentAmmo = FMath::Max(CurrentAmmoInClip, CurrentAmmo);
+		SetCurrentAmmo(FMath::Max(GetCurrentAmmoInClip(), GetCurrentAmmo()));
 	}
 }
 
@@ -591,10 +669,10 @@ void AShooterWeapon::OnBurstStarted()
 {
 	// start firing, can be delayed to satisfy TimeBetweenShots
 	const float GameTime = GetWorld()->GetTimeSeconds();
-	if (LastFireTime > 0 && WeaponConfig.TimeBetweenShots > 0.0f &&
-		LastFireTime + WeaponConfig.TimeBetweenShots > GameTime)
+	if (LastFireTime > 0 && GetTimeBetweenShots() > 0.0f &&
+		LastFireTime + GetTimeBetweenShots() > GameTime)
 	{
-		GetWorldTimerManager().SetTimer(TimerHandle_HandleFiring, this, &AShooterWeapon::HandleFiring, LastFireTime + WeaponConfig.TimeBetweenShots - GameTime, false);
+		GetWorldTimerManager().SetTimer(TimerHandle_HandleFiring, this, &AShooterWeapon::HandleFiring, LastFireTime + GetTimeBetweenShots() - GameTime, false);
 	}
 	else
 	{
@@ -703,7 +781,9 @@ FVector AShooterWeapon::GetAdjustedAim() const
 			FinalAim = AIController->GetControlRotation().Vector();
 		}
 		else
-		{			
+		{
+			//FinalAim = GetInstigator()->GetInstigator()->GetViewRotation().Vector();
+			
 			FinalAim = GetInstigator()->GetBaseAimRotation().Vector();
 		}
 	}
@@ -726,10 +806,11 @@ FVector AShooterWeapon::GetCameraDamageStartLocation(const FVector& AimDir) cons
 		// Adjust trace so there is nothing blocking the ray between the camera and the pawn, and calculate distance from adjusted start
 		OutStartTrace = OutStartTrace + AimDir * ((GetInstigator()->GetActorLocation() - OutStartTrace) | AimDir);
 	}
-	else if (AIPC)
+	else //if (AIPC)
 	{
 		OutStartTrace = GetMuzzleLocation();
 	}
+
 
 	return OutStartTrace;
 }
@@ -746,6 +827,48 @@ FVector AShooterWeapon::GetMuzzleDirection() const
 	return UseMesh->GetSocketRotation(MuzzleAttachPoint).Vector();
 }
 
+float AShooterWeapon::GetCurrentFiringSpread()
+{
+	return  CurrentFiringSpread;
+}
+
+void AShooterWeapon::SetCurrentFiringSpread(float NewSpread)
+{
+	CurrentFiringSpread = NewSpread;
+}
+
+FInstantWeaponData AShooterWeapon::GetInstantConfig() const
+{
+	return InstantConfig;
+}
+
+UAudioComponent* AShooterWeapon::GetCurrentFireWeaponSound() const
+{
+	return FireAC;
+}
+
+void AShooterWeapon::AmmoChanged(const FOnAttributeChangeData& Data)
+{
+	if (GetLocalRole() < ROLE_Authority)
+	{
+		float ActualAmmoChange = Data.OldValue - Data.NewValue;
+		if(0.f < ActualAmmoChange) // 그대로거나 회복된경우
+		{
+			FVector Start;
+			FVector End;
+			Start = GetCameraDamageStartLocation(GetAdjustedAim());
+			End = Start + GetCameraAim() * GetWeaponRange();
+
+			FHitResult Hit = WeaponTrace(Start,End);
+			FHitResult TempHitResult = WeaponTrace(Start,End);
+		
+			SpawnTrailEffect(End);
+			SpawnImpactEffects(Hit);
+		
+		}
+	}
+}
+
 FHitResult AShooterWeapon::WeaponTrace(const FVector& StartTrace, const FVector& EndTrace) const
 {
 
@@ -757,6 +880,14 @@ FHitResult AShooterWeapon::WeaponTrace(const FVector& StartTrace, const FVector&
 	GetWorld()->LineTraceSingleByChannel(Hit, StartTrace, EndTrace, COLLISION_WEAPON, TraceParams);
 
 	return Hit;
+}
+
+void AShooterWeapon::SpawnImpactEffects(const FHitResult& Impact)
+{
+}
+
+void AShooterWeapon::SpawnTrailEffect(const FVector& EndPoint)
+{
 }
 
 void AShooterWeapon::SetOwningPawn(AShooterCharacter* NewOwner)
@@ -816,6 +947,11 @@ void AShooterWeapon::SimulateWeaponFire()
 		return;
 	}
 
+	if(MuzzlePSC != nullptr)
+	{
+		return;
+	}
+
 	if (MuzzleFX)
 	{
 		USkeletalMeshComponent* UseWeaponMesh = GetWeaponMesh();
@@ -868,7 +1004,7 @@ void AShooterWeapon::SimulateWeaponFire()
 	{
 		if (FireCameraShake != NULL)
 		{
-			PC->ClientPlayCameraShake(FireCameraShake, 1);
+			PC->ClientStartCameraShake(FireCameraShake, 1);
 		}
 		if (FireForceFeedback != NULL && PC->IsVibrationEnabled())
 		{
@@ -916,16 +1052,27 @@ void AShooterWeapon::GetLifetimeReplicatedProps( TArray< FLifetimeProperty > & O
 
 	DOREPLIFETIME( AShooterWeapon, MyPawn );
 
-	DOREPLIFETIME_CONDITION( AShooterWeapon, CurrentAmmo,		COND_OwnerOnly );
-	DOREPLIFETIME_CONDITION( AShooterWeapon, CurrentAmmoInClip, COND_OwnerOnly );
+	//DOREPLIFETIME_CONDITION( AShooterWeapon, CurrentAmmo,		COND_OwnerOnly );
+	//DOREPLIFETIME_CONDITION( AShooterWeapon, CurrentAmmoInClip, COND_OwnerOnly );
 
 	DOREPLIFETIME_CONDITION( AShooterWeapon, BurstCounter,		COND_SkipOwner );
 	DOREPLIFETIME_CONDITION( AShooterWeapon, bPendingReload,	COND_SkipOwner );
 }
 
-USkeletalMeshComponent* AShooterWeapon::GetWeaponMesh() const
+USkeletalMeshComponent* AShooterWeapon::GetWeaponMesh(int8 bFPS) const
 {
-	return (MyPawn != NULL && MyPawn->IsFirstPerson()) ? Mesh1P : Mesh3P;
+	if(bFPS == 1)
+	{
+		return Mesh1P;
+	}
+	else if( bFPS == 3)
+	{
+		return Mesh3P;
+	}
+	else
+	{
+		return (MyPawn != NULL && MyPawn->IsFirstPerson()) ? Mesh1P : Mesh3P;
+	}
 }
 
 class AShooterCharacter* AShooterWeapon::GetPawnOwner() const
@@ -950,17 +1097,70 @@ EWeaponState::Type AShooterWeapon::GetCurrentState() const
 
 int32 AShooterWeapon::GetCurrentAmmo() const
 {
-	return CurrentAmmo;
+	UMyWeaponAttributeSet* TempAttribute = Cast<UMyWeaponAttributeSet>(Attributes);
+	if(TempAttribute)
+	{
+		return static_cast<int32>(TempAttribute->GetTotalAmmo());
+	}
+	return -1;
+}
+
+float AShooterWeapon::GetWeaponRange()
+{
+	UMyWeaponAttributeSet* TempAttribute = Cast<UMyWeaponAttributeSet>(Attributes);
+	if(TempAttribute)
+	{
+		return TempAttribute->GetWeaponRange();
+	}
+	return -1.f;
+}
+
+float AShooterWeapon::GetTimeBetweenShots()
+{
+	UMyWeaponAttributeSet* TempAttribute = Cast<UMyWeaponAttributeSet>(Attributes);
+	if(TempAttribute)
+	{
+		return TempAttribute->GetTimeBetweenShots();
+	}
+	return -1.f;
+}
+
+void AShooterWeapon::SetCurrentAmmo(int32 Ammo)
+{
+	UMyWeaponAttributeSet* TempAttribute = Cast<UMyWeaponAttributeSet>(Attributes);
+	if(TempAttribute)
+	{
+		TempAttribute->SetTotalAmmo(Ammo);
+	}
 }
 
 int32 AShooterWeapon::GetCurrentAmmoInClip() const
 {
-	return CurrentAmmoInClip;
+	UMyWeaponAttributeSet* TempAttribute = Cast<UMyWeaponAttributeSet>(Attributes);
+	if(TempAttribute)
+	{
+		return static_cast<int32>(TempAttribute->GetAmmoInClip());
+	}
+	return -1;
+}
+
+void AShooterWeapon::SetCurrentAmmoInClip(int32 Ammo)
+{
+	UMyWeaponAttributeSet* TempAttribute = Cast<UMyWeaponAttributeSet>(Attributes);
+	if(TempAttribute)
+	{
+		TempAttribute->SetAmmoInClip(Ammo);
+	}
 }
 
 int32 AShooterWeapon::GetAmmoPerClip() const
 {
-	return WeaponConfig.AmmoPerClip;
+	UMyWeaponAttributeSet* TempAttribute = Cast<UMyWeaponAttributeSet>(Attributes);
+	if(TempAttribute)
+	{
+		return static_cast<int32>(TempAttribute->GetClipSize());
+	}
+	return -1;
 }
 
 int32 AShooterWeapon::GetMaxAmmo() const

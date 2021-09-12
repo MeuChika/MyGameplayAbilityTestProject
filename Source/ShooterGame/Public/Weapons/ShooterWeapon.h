@@ -4,15 +4,18 @@
 
 #include "GameFramework/Actor.h"
 #include "Engine/Canvas.h" // for FCanvasIcon
+#include "AbilitySystemInterface.h"
+#include <GameplayEffectTypes.h>
 #include "ShooterWeapon.generated.h"
+
 
 class UAnimMontage;
 class AShooterCharacter;
 class UAudioComponent;
 class UParticleSystemComponent;
-class UCameraShake;
 class UForceFeedbackEffect;
 class USoundCue;
+class UMatineeCameraShake;
 
 namespace EWeaponState
 {
@@ -43,16 +46,16 @@ struct FWeaponData
 	int32 MaxAmmo;
 
 	/** clip size */
-	UPROPERTY(EditDefaultsOnly, Category=Ammo)
-	int32 AmmoPerClip;
+	// UPROPERTY(EditDefaultsOnly, Category=Ammo)
+	// int32 AmmoPerClip;
 
 	/** initial clips */
 	UPROPERTY(EditDefaultsOnly, Category=Ammo)
 	int32 InitialClips;
 
 	/** time between two consecutive shots */
-	UPROPERTY(EditDefaultsOnly, Category=WeaponStat)
-	float TimeBetweenShots;
+	// UPROPERTY(EditDefaultsOnly, Category=WeaponStat)
+	// float TimeBetweenShots;
 
 	/** failsafe reload duration if weapon doesn't have any animation for it */
 	UPROPERTY(EditDefaultsOnly, Category=WeaponStat)
@@ -63,10 +66,10 @@ struct FWeaponData
 	{
 		bInfiniteAmmo = false;
 		bInfiniteClip = false;
-		MaxAmmo = 100;
-		AmmoPerClip = 20;
-		InitialClips = 4;
-		TimeBetweenShots = 0.2f;
+		MaxAmmo = 300;
+		//AmmoPerClip = 50;
+		InitialClips = 30;
+		//TimeBetweenShots = 0.1f;
 		NoAnimReloadDuration = 1.0f;
 	}
 };
@@ -85,12 +88,90 @@ struct FWeaponAnim
 	UAnimMontage* Pawn3P;
 };
 
+USTRUCT()
+struct FInstantWeaponData
+{
+	GENERATED_USTRUCT_BODY()
+
+	/** base weapon spread (degrees) */
+	UPROPERTY(EditDefaultsOnly, Category=Accuracy)
+	float WeaponSpread;
+
+	/** targeting spread modifier */
+	UPROPERTY(EditDefaultsOnly, Category=Accuracy)
+	float TargetingSpreadMod;
+
+	/** continuous firing: spread increment */
+	UPROPERTY(EditDefaultsOnly, Category=Accuracy)
+	float FiringSpreadIncrement;
+
+	/** continuous firing: max increment */
+	UPROPERTY(EditDefaultsOnly, Category=Accuracy)
+	float FiringSpreadMax;
+
+	/** weapon range */
+	UPROPERTY(EditDefaultsOnly, Category=WeaponStat)
+	float WeaponRange;
+
+	/** damage amount */
+	UPROPERTY(EditDefaultsOnly, Category=WeaponStat)
+	int32 HitDamage;
+
+	/** type of damage */
+	UPROPERTY(EditDefaultsOnly, Category=WeaponStat)
+	TSubclassOf<UDamageType> DamageType;
+
+	/** hit verification: scale for bounding box of hit actor */
+	UPROPERTY(EditDefaultsOnly, Category=HitVerification)
+	float ClientSideHitLeeway;
+
+	/** hit verification: threshold for dot product between view direction and hit direction */
+	UPROPERTY(EditDefaultsOnly, Category=HitVerification)
+	float AllowedViewDotHitDir;
+
+	/** defaults */
+	FInstantWeaponData()
+	{
+		WeaponSpread = 5.0f;
+		TargetingSpreadMod = 0.25f;
+		FiringSpreadIncrement = 1.0f;
+		FiringSpreadMax = 10.0f;
+		WeaponRange = 10000.0f;
+		HitDamage = 10;
+		DamageType = UDamageType::StaticClass();
+		ClientSideHitLeeway = 200.0f;
+		AllowedViewDotHitDir = 0.8f;
+	}
+};
+
 UCLASS(Abstract, Blueprintable)
-class AShooterWeapon : public AActor
+class AShooterWeapon : public AActor, public IAbilitySystemInterface
 {
 	GENERATED_UCLASS_BODY()
+	
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Abilities, meta = (AllowPrivateAccess = "true"))
+	class UMyAbilitySystemComponent* AbilitySystemComponent;
+	
+	UPROPERTY()
+	class UMyWeaponAttributeSet* Attributes;
 
+	FGameplayTag FireTag;
+	
+	UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category = "Ability")
+	TSubclassOf<class UGameplayEffect> DefaultAttributeEffect;
+	
+	UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category = "Ability")
+	TArray<TSubclassOf<class UMyGameplayAbility>> DefaultAbilities;
+	
+	virtual class UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 	/** perform initial setup */
+	
+	virtual void BeginPlay() override;
+	
+	void InitializeAttributes();
+	void GiveAbilies();
+	void BindASC();
+
 	virtual void PostInitializeComponents() override;
 
 	virtual void Destroyed() override;
@@ -108,6 +189,7 @@ class AShooterWeapon : public AActor
 	/** [server] add ammo */
 	void GiveAmmo(int AddAmount);
 
+	UFUNCTION(BlueprintCallable)
 	/** consume a bullet */
 	void UseAmmo();
 
@@ -117,6 +199,8 @@ class AShooterWeapon : public AActor
 		return EAmmoType::EBullet;
 	}
 
+	virtual float GetCurrentSpread() const { return 0.f; }
+	
 	//////////////////////////////////////////////////////////////////////////
 	// Inventory
 
@@ -182,19 +266,36 @@ class AShooterWeapon : public AActor
 	EWeaponState::Type GetCurrentState() const;
 
 	/** get current ammo amount (total) */
+	UFUNCTION(BlueprintPure)
 	int32 GetCurrentAmmo() const;
+	
+	UFUNCTION(BlueprintPure)
+	float GetWeaponRange();
+	
+	UFUNCTION(BlueprintPure)
+	float GetTimeBetweenShots();
 
+	UFUNCTION(BlueprintCallable)
+	void SetCurrentAmmo(int32 Ammo);
+	
 	/** get current ammo amount (clip) */
+	UFUNCTION(BlueprintPure)
 	int32 GetCurrentAmmoInClip() const;
 
+	UFUNCTION(BlueprintCallable)
+	void SetCurrentAmmoInClip(int32 Ammo);
+	
 	/** get clip size */
+	UFUNCTION(BlueprintPure)
 	int32 GetAmmoPerClip() const;
 
 	/** get max ammo amount */
+	UFUNCTION(BlueprintPure)
 	int32 GetMaxAmmo() const;
 
 	/** get weapon mesh (needs pawn owner to determine variant) */
-	USkeletalMeshComponent* GetWeaponMesh() const;
+	/** ViewPoint = -1 = Default(보이는 시점에 따른 반환), 1 = 1인칭매쉬, 3 = 3인칭매쉬를 반환한다.*/
+	USkeletalMeshComponent* GetWeaponMesh(int8 ViewPoint = -1) const;
 
 	/** get pawn owner */
 	UFUNCTION(BlueprintCallable, Category="Game|Weapon")
@@ -275,6 +376,69 @@ class AShooterWeapon : public AActor
 	/** gets the duration of equipping weapon*/
 	float GetEquipDuration() const;
 
+	/** Get the aim of the weapon, allowing for adjustments to be made by the weapon */
+	UFUNCTION(BlueprintCallable)
+	virtual FVector GetAdjustedAim() const;
+
+	/** Get the aim of the camera */
+	UFUNCTION(BlueprintCallable)
+	FVector GetCameraAim() const;
+
+	/** get the originating location for camera damage */
+	UFUNCTION(BlueprintCallable)
+	FVector GetCameraDamageStartLocation(const FVector& AimDir) const;
+
+	/** get the muzzle location of the weapon */
+	FVector GetMuzzleLocation() const;
+
+	/** get direction of weapon's muzzle */
+	FVector GetMuzzleDirection() const;
+
+	float GetCurrentFiringSpread();
+	
+	void SetCurrentFiringSpread(float NewSpread);
+	
+	FInstantWeaponData GetInstantConfig() const;
+
+	/** single fire sound (bLoopedFireSound not set) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Sound)
+		USoundCue* FireSound;
+
+	/** looped fire sound (bLoopedFireSound set) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Sound)
+		USoundCue* FireLoopSound;
+
+	/** finished burst sound (bLoopedFireSound set) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Sound)
+		USoundCue* FireFinishSound;
+
+	/** out of ammo sound */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Sound)
+		USoundCue* OutOfAmmoSound;
+
+	/** reload sound */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Sound)
+		USoundCue* ReloadSound;
+
+	/** reload animations */
+	UPROPERTY(EditDefaultsOnly, Category = Animation)
+		FWeaponAnim ReloadAnim;
+
+	/** equip sound */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = Sound)
+		USoundCue* EquipSound;
+
+	UFUNCTION(BlueprintCallable)
+	UAudioComponent* GetCurrentFireWeaponSound() const;
+
+	UFUNCTION(BlueprintCallable)
+	void SetFireCurrentWeaponSound(UAudioComponent* SoundSource) {FireAC = SoundSource;}
+
+	FDelegateHandle AmmoChangedDelegateHandle;
+
+	// Attribute changed callbacks
+	virtual void AmmoChanged(const FOnAttributeChangeData& Data);
+
 protected:
 
 	/** pawn owner */
@@ -284,6 +448,10 @@ protected:
 	/** weapon data */
 	UPROPERTY(EditDefaultsOnly, Category=Config)
 	FWeaponData WeaponConfig;
+
+	/** weapon config */
+	UPROPERTY(EditDefaultsOnly, Category=Config)
+	FInstantWeaponData InstantConfig;
 
 private:
 	/** weapon mesh: 1st person view */
@@ -317,39 +485,12 @@ protected:
 
 	/** camera shake on firing */
 	UPROPERTY(EditDefaultsOnly, Category=Effects)
-	TSubclassOf<UCameraShake> FireCameraShake;
+	TSubclassOf<UMatineeCameraShake> FireCameraShake;
 
 	/** force feedback effect to play when the weapon is fired */
 	UPROPERTY(EditDefaultsOnly, Category=Effects)
 	UForceFeedbackEffect *FireForceFeedback;
 
-	/** single fire sound (bLoopedFireSound not set) */
-	UPROPERTY(EditDefaultsOnly, Category=Sound)
-	USoundCue* FireSound;
-
-	/** looped fire sound (bLoopedFireSound set) */
-	UPROPERTY(EditDefaultsOnly, Category=Sound)
-	USoundCue* FireLoopSound;
-
-	/** finished burst sound (bLoopedFireSound set) */
-	UPROPERTY(EditDefaultsOnly, Category=Sound)
-	USoundCue* FireFinishSound;
-
-	/** out of ammo sound */
-	UPROPERTY(EditDefaultsOnly, Category=Sound)
-	USoundCue* OutOfAmmoSound;
-
-	/** reload sound */
-	UPROPERTY(EditDefaultsOnly, Category=Sound)
-	USoundCue* ReloadSound;
-
-	/** reload animations */
-	UPROPERTY(EditDefaultsOnly, Category=Animation)
-	FWeaponAnim ReloadAnim;
-
-	/** equip sound */
-	UPROPERTY(EditDefaultsOnly, Category=Sound)
-	USoundCue* EquipSound;
 
 	/** equip animations */
 	UPROPERTY(EditDefaultsOnly, Category=Animation)
@@ -376,7 +517,7 @@ protected:
 
 	/** is weapon currently equipped? */
 	uint32 bIsEquipped : 1;
-
+	
 	/** is weapon fire active? */
 	uint32 bWantsToFire : 1;
 
@@ -402,13 +543,16 @@ protected:
 	/** how much time weapon needs to be equipped */
 	float EquipDuration;
 
+	/** current spread from continuous firing */
+	float CurrentFiringSpread;
+	
 	/** current total ammo */
-	UPROPERTY(Transient, Replicated)
-	int32 CurrentAmmo;
+	// UPROPERTY(Transient, Replicated)
+	// int32 CurrentAmmo;
 
 	/** current ammo - inside clip */
-	UPROPERTY(Transient, Replicated)
-	int32 CurrentAmmoInClip;
+	// UPROPERTY(Transient, Replicated)
+	// int32 CurrentAmmoInClip;
 
 	/** burst counter, used for replicating fire events to remote clients */
 	UPROPERTY(Transient, ReplicatedUsing=OnRep_BurstCounter)
@@ -455,9 +599,11 @@ protected:
 	void OnRep_Reload();
 
 	/** Called in network play to do the cosmetic fx for firing */
+	UFUNCTION(BlueprintCallable)
 	virtual void SimulateWeaponFire();
 
 	/** Called in network play to stop cosmetic fx (e.g. for a looping shot). */
+	UFUNCTION(BlueprintCallable)
 	virtual void StopSimulatingWeaponFire();
 
 
@@ -465,6 +611,7 @@ protected:
 	// Weapon usage
 
 	/** [local] weapon specific fire implementation */
+	UFUNCTION(BlueprintCallable)
 	virtual void FireWeapon() PURE_VIRTUAL(AShooterWeapon::FireWeapon,);
 
 	/** [server] fire & update ammo */
@@ -476,7 +623,7 @@ protected:
 
 	/** [local + server] handle weapon fire */
 	void HandleFiring();
-
+	
 	/** [local + server] firing started */
 	virtual void OnBurstStarted();
 
@@ -499,11 +646,11 @@ protected:
 	/** detaches weapon mesh from pawn */
 	void DetachMeshFromPawn();
 
-
 	//////////////////////////////////////////////////////////////////////////
 	// Weapon usage helpers
 
 	/** play weapon sounds */
+	UFUNCTION(BlueprintCallable)
 	UAudioComponent* PlayWeaponSound(USoundCue* Sound);
 
 	/** play weapon animations */
@@ -512,23 +659,17 @@ protected:
 	/** stop playing weapon animations */
 	void StopWeaponAnimation(const FWeaponAnim& Animation);
 
-	/** Get the aim of the weapon, allowing for adjustments to be made by the weapon */
-	virtual FVector GetAdjustedAim() const;
-
-	/** Get the aim of the camera */
-	FVector GetCameraAim() const;
-
-	/** get the originating location for camera damage */
-	FVector GetCameraDamageStartLocation(const FVector& AimDir) const;
-
-	/** get the muzzle location of the weapon */
-	FVector GetMuzzleLocation() const;
-
-	/** get direction of weapon's muzzle */
-	FVector GetMuzzleDirection() const;
-
 	/** find hit */
+	UFUNCTION(BlueprintCallable)
 	FHitResult WeaponTrace(const FVector& TraceFrom, const FVector& TraceTo) const;
+
+	/** spawn effects for impact */
+	UFUNCTION(BlueprintCallable)
+	virtual void SpawnImpactEffects(const FHitResult& Impact);
+
+	/** spawn trail effect */
+	UFUNCTION(BlueprintCallable)
+	virtual void SpawnTrailEffect(const FVector& EndPoint);
 
 protected:
 	/** Returns Mesh1P subobject **/

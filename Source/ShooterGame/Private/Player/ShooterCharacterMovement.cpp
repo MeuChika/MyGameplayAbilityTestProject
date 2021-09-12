@@ -19,6 +19,7 @@ float UShooterCharacterMovement::GetMaxSpeed() const
 	const AShooterCharacter* ShooterCharacterOwner = Cast<AShooterCharacter>(PawnOwner);
 	if (ShooterCharacterOwner)
 	{
+		MaxSpeed *= 1.f + ShooterCharacterOwner->GetAdditionalMoveSpeed();
 		if (ShooterCharacterOwner->IsTargeting())
 		{
 			MaxSpeed *= ShooterCharacterOwner->GetTargetingSpeedModifier();

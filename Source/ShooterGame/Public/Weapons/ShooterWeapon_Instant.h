@@ -22,62 +22,6 @@ struct FInstantHitInfo
 	int32 RandomSeed;
 };
 
-USTRUCT()
-struct FInstantWeaponData
-{
-	GENERATED_USTRUCT_BODY()
-
-	/** base weapon spread (degrees) */
-	UPROPERTY(EditDefaultsOnly, Category=Accuracy)
-	float WeaponSpread;
-
-	/** targeting spread modifier */
-	UPROPERTY(EditDefaultsOnly, Category=Accuracy)
-	float TargetingSpreadMod;
-
-	/** continuous firing: spread increment */
-	UPROPERTY(EditDefaultsOnly, Category=Accuracy)
-	float FiringSpreadIncrement;
-
-	/** continuous firing: max increment */
-	UPROPERTY(EditDefaultsOnly, Category=Accuracy)
-	float FiringSpreadMax;
-
-	/** weapon range */
-	UPROPERTY(EditDefaultsOnly, Category=WeaponStat)
-	float WeaponRange;
-
-	/** damage amount */
-	UPROPERTY(EditDefaultsOnly, Category=WeaponStat)
-	int32 HitDamage;
-
-	/** type of damage */
-	UPROPERTY(EditDefaultsOnly, Category=WeaponStat)
-	TSubclassOf<UDamageType> DamageType;
-
-	/** hit verification: scale for bounding box of hit actor */
-	UPROPERTY(EditDefaultsOnly, Category=HitVerification)
-	float ClientSideHitLeeway;
-
-	/** hit verification: threshold for dot product between view direction and hit direction */
-	UPROPERTY(EditDefaultsOnly, Category=HitVerification)
-	float AllowedViewDotHitDir;
-
-	/** defaults */
-	FInstantWeaponData()
-	{
-		WeaponSpread = 5.0f;
-		TargetingSpreadMod = 0.25f;
-		FiringSpreadIncrement = 1.0f;
-		FiringSpreadMax = 10.0f;
-		WeaponRange = 10000.0f;
-		HitDamage = 10;
-		DamageType = UDamageType::StaticClass();
-		ClientSideHitLeeway = 200.0f;
-		AllowedViewDotHitDir = 0.8f;
-	}
-};
-
 // A weapon where the damage impact occurs instantly upon firing
 UCLASS(Abstract)
 class AShooterWeapon_Instant : public AShooterWeapon
@@ -85,7 +29,7 @@ class AShooterWeapon_Instant : public AShooterWeapon
 	GENERATED_UCLASS_BODY()
 
 	/** get current spread */
-	float GetCurrentSpread() const;
+	virtual float GetCurrentSpread() const override;
 
 protected:
 
@@ -93,10 +37,6 @@ protected:
 	{
 		return EAmmoType::EBullet;
 	}
-
-	/** weapon config */
-	UPROPERTY(EditDefaultsOnly, Category=Config)
-	FInstantWeaponData InstantConfig;
 
 	/** impact effects */
 	UPROPERTY(EditDefaultsOnly, Category=Effects)
@@ -113,9 +53,6 @@ protected:
 	/** instant hit notify for replication */
 	UPROPERTY(Transient, ReplicatedUsing=OnRep_HitNotify)
 	FInstantHitInfo HitNotify;
-
-	/** current spread from continuous firing */
-	float CurrentFiringSpread;
 
 	//////////////////////////////////////////////////////////////////////////
 	// Weapon usage
@@ -157,8 +94,8 @@ protected:
 	void SimulateInstantHit(const FVector& Origin, int32 RandomSeed, float ReticleSpread);
 
 	/** spawn effects for impact */
-	void SpawnImpactEffects(const FHitResult& Impact);
+	virtual void SpawnImpactEffects(const FHitResult& Impact) override;
 
 	/** spawn trail effect */
-	void SpawnTrailEffect(const FVector& EndPoint);
+	virtual void SpawnTrailEffect(const FVector& EndPoint) override;
 };

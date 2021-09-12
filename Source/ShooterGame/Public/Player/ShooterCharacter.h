@@ -3,17 +3,43 @@
 #pragma once
 
 #include "ShooterTypes.h"
+#include "AbilitySystemInterface.h"
+#include <GameplayEffectTypes.h>
 #include "ShooterCharacter.generated.h"
 
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnShooterCharacterEquipWeapon, AShooterCharacter*, AShooterWeapon* /* new */);
 DECLARE_MULTICAST_DELEGATE_TwoParams(FOnShooterCharacterUnEquipWeapon, AShooterCharacter*, AShooterWeapon* /* old */);
 
+
 UCLASS(Abstract)
-class AShooterCharacter : public ACharacter
+class AShooterCharacter : public ACharacter, public IAbilitySystemInterface
 {
 	GENERATED_UCLASS_BODY()
+	
+	/** Our ability system */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Abilities, meta = (AllowPrivateAccess = "true"))
+	class UMyAbilitySystemComponent* AbilitySystemComponent;
 
+	UPROPERTY()
+	class UMyAttributeSet* Attributes;
+	
 	virtual void BeginDestroy() override;
+
+	virtual void BeginPlay() override;
+
+	void BindASC();
+
+	bool ASCInputBound = false;
+	
+	FGameplayTag ReloadAbilityTag;
+
+	FDelegateHandle HealthChangedDelegateHandle;
+
+	
+	void OnApplyGameplayEffectCallback(UAbilitySystemComponent* Target, const FGameplayEffectSpec& SpecApplied, FActiveGameplayEffectHandle ActiveHandle);
+	
+	// Attribute changed callbacks
+	virtual void HealthChanged(const FOnAttributeChangeData& Data);
 
 	/** spawn inventory, setup initial variables */
 	virtual void PostInitializeComponents() override;
@@ -132,6 +158,13 @@ class AShooterCharacter : public ACharacter
 	virtual void SetupPlayerInputComponent(class UInputComponent* InputComponent) override;
 
 	/**
+	* Handle analog trigger for firing
+	*
+	* @param Val trigger input to apply
+	*/
+	void FireTrigger(float Val);
+
+	/**
 	* Move forward/back
 	*
 	* @param Val Movment input to apply
@@ -198,7 +231,8 @@ class AShooterCharacter : public ACharacter
 	// Reading data
 
 	/** get mesh component */
-	USkeletalMeshComponent* GetPawnMesh() const;
+	UFUNCTION(BlueprintCallable)
+	USkeletalMeshComponent* GetPawnMesh(int ViewPoint = -1) const;
 
 	/** get currently equipped weapon */
 	UFUNCTION(BlueprintCallable, Category = "Game|Weapon")
@@ -248,7 +282,7 @@ class AShooterCharacter : public ACharacter
 	virtual bool IsFirstPerson() const;
 
 	/** get max health */
-	int32 GetMaxHealth() const;
+	/*int32 GetMaxHealth() const;*/
 
 	/** check if pawn is still alive */
 	bool IsAlive() const;
@@ -265,13 +299,21 @@ class AShooterCharacter : public ACharacter
 
 	/** Update the team color of all player meshes. */
 	void UpdateTeamColorsAllMIDs();
+
+	/* 어빌리티를 저장할곳 */
+	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = Abilities)
+	//TArray<TSubclassOf<class UMyGameplayAbility>> Ability;
+
+	bool GetbWantsToFire(){return bWantsToFire;}
+	void SetbWantsToFire(bool TempValue){bWantsToFire = TempValue;}
+
 private:
 
 	/** pawn mesh: 1st person view */
 	UPROPERTY(VisibleDefaultsOnly, Category = Mesh)
 	USkeletalMeshComponent* Mesh1P;
 protected:
-
+	
 	/** socket or bone name for attaching weapon mesh */
 	UPROPERTY(EditDefaultsOnly, Category = Inventory)
 	FName WeaponAttachPoint;
@@ -392,13 +434,23 @@ private:
 
 public:
 
+	virtual class UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+	virtual void InitializeAttributes();
+	virtual void GiveAbilies();
+	
+	UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category = "Ability")
+	TSubclassOf<class UGameplayEffect> DefaultAttributeEffect;
+
+	UPROPERTY(BlueprintReadOnly, EditDefaultsOnly, Category = "Ability")
+	TArray<TSubclassOf<class UMyGameplayAbility>> DefaultAbilities;
+	
 	/** Identifies if pawn is in its dying state */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = Health)
 	uint32 bIsDying : 1;
 
 	// Current health of the Pawn
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = Health)
-	float Health;
+	//UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = Health)
+	//float Health;
 
 	/** Take damage, handle death */
 	virtual float TakeDamage(float Damage, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, class AActor* DamageCauser) override;
@@ -427,7 +479,27 @@ public:
 
 	/** Called on the actor right before replication occurs */
 	virtual void PreReplication(IRepChangedPropertyTracker & ChangedPropertyTracker) override;
+
+	class AShooterWeapon* GetCurrentWeapon(){return CurrentWeapon;}
+
+	UFUNCTION(BlueprintCallable, Category = "ShooterCharacter | Attributes")
+	float GetHealth() const;
+
+	UFUNCTION(BlueprintCallable, Category = "ShooterCharacter | Attributes")
+	void SetHealth(float NewHealth);
+
+	UFUNCTION(BlueprintCallable, Category = "ShooterCharacter | Attributes")
+	float GetMaxHealth() const;
+
+	UFUNCTION(BlueprintCallable, Category = "ShooterCharacter | Attributes")
+	float GetAdditionalMoveSpeed() const;
+
+	UFUNCTION(BlueprintCallable, Category = "ShooterCharacter | Attributes")
+	void SetAdditionalMoveSpeed(float NewSpeed);
 protected:
+	UPROPERTY()
+	TWeakObjectPtr<AActor> LastAttacker;
+	
 	/** notification when killed, for both the server and client. */
 	virtual void OnDeath(float KillingDamage, struct FDamageEvent const& DamageEvent, class APawn* InstigatingPawn, class AActor* DamageCauser);
 
@@ -449,7 +521,7 @@ protected:
 
 	/** updates current weapon */
 	void SetCurrentWeapon(class AShooterWeapon* NewWeapon, class AShooterWeapon* LastWeapon = NULL);
-
+	
 	/** current weapon rep handler */
 	UFUNCTION()
 	void OnRep_CurrentWeapon(class AShooterWeapon* LastWeapon);

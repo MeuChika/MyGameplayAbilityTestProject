@@ -16,6 +16,9 @@ class AShooterPickup : public AActor
 	/** check if pawn can use this pickup */
 	virtual bool CanBePickedUp(class AShooterCharacter* TestPawn) const;
 
+	UFUNCTION(BlueprintPure)
+	AShooterCharacter* GetPickedUpBy() const {return PickedUpBy;};
+	
 protected:
 	/** initial setup */
 	virtual void BeginPlay() override;
@@ -26,6 +29,9 @@ private:
 	UParticleSystemComponent* PickupPSC;
 
 protected:
+	UPROPERTY(EditDefaultsOnly, Category=Ability)
+	TSubclassOf<class UGameplayEffect> EffectToApply;
+	
 	/** FX of active pickup */
 	UPROPERTY(EditDefaultsOnly, Category=Effects)
 	UParticleSystem* ActiveFX;

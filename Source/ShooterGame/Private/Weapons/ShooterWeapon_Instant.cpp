@@ -2,6 +2,8 @@
 
 #include "ShooterGame.h"
 #include "Weapons/ShooterWeapon_Instant.h"
+
+#include "MyAbilitySystemComponent.h"
 #include "Particles/ParticleSystemComponent.h"
 #include "Effects/ShooterImpactEffect.h"
 
@@ -20,10 +22,10 @@ void AShooterWeapon_Instant::FireWeapon()
 	const float CurrentSpread = GetCurrentSpread();
 	const float ConeHalfAngle = FMath::DegreesToRadians(CurrentSpread * 0.5f);
 
-	const FVector AimDir = GetAdjustedAim();
-	const FVector StartTrace = GetCameraDamageStartLocation(AimDir);
+	const FVector AimDir = GetAdjustedAim(); // 내가보는 방향
+	const FVector StartTrace = GetCameraDamageStartLocation(AimDir); // 카메라 위치
 	const FVector ShootDir = WeaponRandomStream.VRandCone(AimDir, ConeHalfAngle, ConeHalfAngle);
-	const FVector EndTrace = StartTrace + ShootDir * InstantConfig.WeaponRange;
+	const FVector EndTrace = StartTrace + ShootDir * GetWeaponRange();
 
 	const FHitResult Impact = WeaponTrace(StartTrace, EndTrace);
 	ProcessInstantHit(Impact, StartTrace, ShootDir, RandomSeed, CurrentSpread);
