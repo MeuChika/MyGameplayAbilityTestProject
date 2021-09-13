@@ -90,27 +90,25 @@ AShooterCharacter::AShooterCharacter(const FObjectInitializer& ObjectInitializer
 void AShooterCharacter::OnApplyGameplayEffectCallback(UAbilitySystemComponent* Target,
 	const FGameplayEffectSpec& SpecApplied, FActiveGameplayEffectHandle ActiveHandle)
 {
+	// 잘못만듬 수정필요 타겟은 대상이아닌 나자신이다. -> 데미지를 대상타겟의 어빌리티 시스템을 불러와 ToSelf로 입력했기때문이다. -> 내 어빌리티를 불러와 totarget 으로 변경하자.
+	// 발생하는 문제 : 죽인사람이 나자신이 나옴.
+	// 수정됨 - BP에서 공격자 어빌리티 시스템에서 ApplyToTarget으로 변경하여 Instigater가 공격자로 변경됨. 21.09.13 11:30 조익상
 	AActor* AvatarActor = Target ? Target->GetAvatarActor_Direct() : nullptr;
 	if(Target)
 	{
+		//ActiveHandle.GetOwningAbilitySystemComponent()
 		LastAttacker = Target->GetAvatarActor_Direct();
 	}
 }
 
 void AShooterCharacter::HealthChanged(const FOnAttributeChangeData& Data)
 {
-	/*if(Data.NewValue > GetMaxHealth())
-	{
-		SetHealth(GetMaxHealth());
-		return;
-	}*/
-	
 	float ActualDamage = Data.OldValue - Data.NewValue;
 	if(0.f >= ActualDamage) // 그대로거나 회복된경우
 	{
 		return;
 	}
-	//SetHealth(GetHealth()- ActualDamage);
+	
 	if (GetHealth() <= 0)
 	{
 		if(LastAttacker.Get())
@@ -126,9 +124,7 @@ void AShooterCharacter::HealthChanged(const FOnAttributeChangeData& Data)
 	{
 		//PlayHit(ActualDamage, FDamageEvent(), nullptr, nullptr);
 	}
-
 	MakeNoise(1.0f, this);
-	
 }
 
 void AShooterCharacter::PostInitializeComponents()
@@ -199,12 +195,12 @@ void AShooterCharacter::PossessedBy(class AController* InController) // 서버�
 	// Server ability init.
 	AbilitySystemComponent->InitAbilityActorInfo(this, this);
 	
-	InitializeAttributes();
-	GiveAbilies();
+	InitializeAttributes(); // 어빌리티 초기화 서버에서만 작동.
+	GiveAbilies(); // 어빌리티 등록 - 반드시 서버에서만 등록
 	//AbilitySystemComponent->RefreshAbilityActorInfo();
 }
 
-void AShooterCharacter::OnRep_PlayerState() // 클라단
+void AShooterCharacter::OnRep_PlayerState() // 클라
 {
 	Super::OnRep_PlayerState();
 
@@ -213,7 +209,6 @@ void AShooterCharacter::OnRep_PlayerState() // 클라단
 	{
 		UpdateTeamColorsAllMIDs();
 	}
-	//InitializeAttributes();
 	BindASC();
 }
 
@@ -328,6 +323,9 @@ void AShooterCharacter::KilledBy(APawn* EventInstigator)
 
 float AShooterCharacter::TakeDamage(float Damage, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, class AActor* DamageCauser)
 {
+	// healthChanged()함수에 기능이 이전됨. 만약 불린다면 문제가 있는것 2021.09.13 11:40 조익상
+	UE_LOG(LogTemp, Warning, TEXT("TakeDamage is Calling, ApplyDamage() is calling somewhere."));
+	return Super::TakeDamage(Damage, DamageEvent, EventInstigator, DamageCauser);
 	AShooterPlayerController* MyPC = Cast<AShooterPlayerController>(Controller);
 	if (MyPC && MyPC->HasGodMode())
 	{
